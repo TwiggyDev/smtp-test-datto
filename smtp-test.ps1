@@ -1,3 +1,6 @@
+# This is just a generic test message; get's split into an array of commands
+$Global:defaultBody = Get-Content .\EmailMessage.txt
+
 <#
   A DNS Name resolving function
   Designed to be flexible, and work with a list of hostnames
@@ -53,41 +56,51 @@ function Run-SMTPTest {
   param(
     [Parameter(Mandatory=$true, Position=0, ValueFromPipeLine)]
     [ValidateNotNullOrEmpty()]
-    [string[]]
+    [string]
     $Recipient,
     [Parameter(Mandatory=$false, Position=1)]
     [ValidateNotNullOrEmpty()]
     [string]
-    $Subject,
+    $Subject = "SMTP Testing - IT Administration",
     [Parameter(Mandatory=$false, Position=2)]
     [ValidateNotNullOrEmpty()]
     [string]
-    $Sender,
+    $Sender = "SMTPTest@FakeDomain.com",
     [Parameter(Mandatory=$false, Position=3)]
     [ValidateNotNullOrEmpty()]
     [string]
-    $Server,
+    $Server = "",
     [Parameter(Mandatory=$false, Position=4)]
     [ValidateNotNullOrEmpty()]
     [int32]
-    $ServerPort,
+    $ServerPort = 25,
     [Parameter(Mandatory=$false, Position=5)]
-    [ValidateNotNullOrEmpty()]
-    [string]
-    $RecipientServer,
-    [Parameter(Mandatory=$false, Position=6)]
-    [ValidateNotNullOrEmpty()]
+    [ValidateSet("Inbound","INB","IN","OUT","OUTB","OUTBOUND", ignorecase=$true)]
     [int32]
-    $RecipientPort
+    $Direction = "Inbound"
   )
+  # Need to figure out the possible mode we are going for...
   begin{
-
+    # Figure out whether inbound / outbound (Inbound meaning you focus on recipient end / sending as a server, or Outbound as in connecting
+    # to the desired server for sending - I.e. Exchange Online)
+    if($direction.ToUpper() -in @("INBOUND","INB","IN")){
+      $domain = ($Recipient -split "@")[-1]
+    }else{
+      $domain = ($Sender -split "@")[-1]
+    }
+    # Since a custom server is not defined, let's just set it to what the MX record of the Sender's domain
+    # NOTE: it will likely return as multiple IPs depending on the server; so logic should be set to try one, and then the next...
+    #       until either one works or all fail
+    if($Server -eq "" -or $null -eq $Server){
+      $Server = (Get-DNSResolved (Get-DNSResolved $domain -Type MX).NameExchange).IPAddress
+    }
   }
   process{
-
+    ## Process will involve handling the connection, and going through a specific series of commands up until the attempt
+    ## Of actually sending the email
   }
   end{
-
+    
   }
 }
 
