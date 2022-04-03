@@ -56,7 +56,7 @@ function Run-SMTPTest {
   param(
     [Parameter(Mandatory=$true, Position=0, ValueFromPipeLine)]
     [ValidateNotNullOrEmpty()]
-    [string]
+    [string[]]
     $Recipient,
     [Parameter(Mandatory=$false, Position=1)]
     [ValidateNotNullOrEmpty()]
@@ -76,52 +76,113 @@ function Run-SMTPTest {
     $ServerPort = 25,
     [Parameter(Mandatory=$false, Position=5)]
     [ValidateSet("Inbound","INB","IN","OUT","OUTB","OUTBOUND", ignorecase=$true)]
-    [int32]
+    [string]
     $Direction = "Inbound"
   )
   # Need to figure out the possible mode we are going for...
   begin{
     # Figure out whether inbound / outbound (Inbound meaning you focus on recipient end / sending as a server, or Outbound as in connecting
     # to the desired server for sending - I.e. Exchange Online)
-    if($direction.ToUpper() -in @("INBOUND","INB","IN")){
-      $domain = ($Recipient -split "@")[-1]
-    }else{
-      $domain = ($Sender -split "@")[-1]
-    }
-    # Since a custom server is not defined, let's just set it to what the MX record of the Sender's domain
-    # NOTE: it will likely return as multiple IPs depending on the server; so logic should be set to try one, and then the next...
-    #       until either one works or all fail
-    if($Server -eq "" -or $null -eq $Server){
-      $Server = (Get-DNSResolved (Get-DNSResolved $domain -Type MX).NameExchange).IPAddress
-    }
+
+    # Here is the list of commands - this is a skeleton for testing.DESCRIPTION
+    # Going to have to set this with replace portions - can rebuild the proper message during each process
+    #$(if($spfcommands){$spfcommands}else{""})
+    $commandsTemplate = @"
+EHLO [DOMAIN][SPF]
+MAIL FROM:<[SENDER]>
+RCPT TO:<[RECIPIENT]>
+DATA
+<MESSAGE>
+escape
+"@
+
+    $messageTemplate = @"
+Date: [DATE]
+To: [RECIPIENT]
+From: SMTP Testing <[SENDER]>
+Subject: [SUBJECT]
+Message-ID: <b43b694073f6450e95dc92d566f11ce7@_>
+X-Mailer: SMTP-Tester
+MIME-Version: 1.0
+Content-Type: text/plain; charset=iso-8859-1
+
+[BODY]
+
+.
+"@
+
   }
   process{
     ## Process will involve handling the connection, and going through a specific series of commands up until the attempt
     ## Of actually sending the email
+    foreach($recip in $Recipient){
+      $SenderDomain = ($Sender -split "@")[-1]
+      $RecipientDomain = ($recip -split "@")[-1]
+      if($direction.ToUpper() -in @("INBOUND","INB","IN")){
+        $domain = $RecipientDomain
+      }else{
+        $domain = $SenderDomain
+      }
+      # Since a custom server is not defined, let's just set it to what the MX record of the Sender's domain
+      # NOTE: it will likely return as multiple IPs depending on the server; so logic should be set to try one, and then the next...
+      #       until either one works or all fail
+      if($Server -eq "" -or $null -eq $Server){
+        $Server = (Get-DNSResolved (Get-DNSResolved $domain -Type MX).NameExchange).IPAddress[0]
+      }
+      ## Format for Header
+      $DateF = ((Get-DAte -Format "ddd, d MMM yyyy H:mm:ss ") + (((Get-Date -Format "zzz") -split ":") -join ""))
+      $commands = $commandsTemplate
+      $message = $MessageTemplate
+      $commands = $commands -replace "\[DOMAIN\]",$SenderDomain
+      $commands = $commands -replace "\[SPF\]",""
+      $commands = $commands -replace "\[SENDER\]",$Sender
+      $commands = $commands -replace "\[RECIPIENT\]",$recip
+      $message = $message -replace "\[SENDER\]",$Sender
+      $message = $message -replace "\[RECIPIENT\]",$recip
+      $message = $message -replace "\[DATE\]",$DateF
+      $message = $message -replace "\[SUBJECT\]",$subject
+      $message = $message -replace "\[BODY\]","Testing email"
+      $commands = $commands.Split([Environment]::NewLine)
+      $message = $message.Split([Environment]::NewLine)
+      ## Get TCP connection Going
+      $commandCount = 0
+      Write-Host $server -ForegroundColor Green
+      $tcp = New-Object System.Net.Sockets.TcpClient($server,$serverport)
+      $tcpstream = $tcp.GetStream()
+      $writer = New-Object System.IO.StreamWriter($tcpstream)
+      $reader = New-Object System.IO.StreamReader($tcpstream)
+
+      while($tcp.connected)
+      {
+        write-host ([char]$Reader.Read()) -NoNewLine
+        while(($reader.Peek() -ne -1) -or ($tcp.Available)){
+          write-host ([char]$reader.Read()) -NoNewLine
+        }
+        if($tcp.connected)
+        {
+            $command = $commands[$commandCount]
+            if($command -eq "escape"){break}
+            if($command -eq "<MESSAGE>"){
+              foreach($msg in $message){
+                if($tcpstream.DataAvailable){$reader.ReadLine()}
+                Write-Host $msg -ForegroundColor Yellow
+                $writer.WriteLine($msg)
+                $Writer.Flush()
+              }
+            }else{
+              Write-Host $command -ForegroundColor Yellow
+              $writer.WriteLine($command)|Out-Null
+              $Writer.Flush()
+            }
+            $commandCount++
+        }
+      }
+      $reader.Close()
+      $writer.close()
+      $tcp.Close()
+    }
   }
   end{
-    
+
   }
 }
-
-
-while($tcp.connected)
-{
-write-host ([char]$Reader.Read()) -NoNewLine
-while(($reader.Peek() -ne -1) -or ($tcp.Available)){
-write-host ([char]$reader.Read()) -NoNewLine
-}
-if($tcp.connected)
-{
-write-host -NoNewLine "_"
-$command = Read-Host
-if($command -eq "escape")
-{
-break
-}
-$writer.WriteLine($command)|Out-Null
-}
-}
-$reader.Close()
-$writer.close()
-$tcp.Close()
