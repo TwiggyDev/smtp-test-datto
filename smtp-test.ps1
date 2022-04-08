@@ -1,5 +1,5 @@
 # This is just a generic test message; get's split into an array of commands
-$Global:defaultBody = Get-Content .\EmailMessage.txt
+##$Global:defaultBody = Get-Content .\EmailMessage.txt
 
 <#
   A DNS Name resolving function
@@ -154,10 +154,20 @@ Content-Type: text/plain; charset=iso-8859-1
 
       while($tcp.connected)
       {
-        write-host ([char]$Reader.Read()) -NoNewLine
+        $reply = ""
+        $reply += ([char]$Reader.Read())
         while(($reader.Peek() -ne -1) -or ($tcp.Available)){
-          write-host ([char]$reader.Read()) -NoNewLine
+          $reply += ([char]$reader.Read())
         }
+        switch -Wildcard ($reply){
+            "5*" {Write-Host $reply -ForegroundColor Red -NoNewLine; Break}
+            "2*" {Write-Host $reply -ForegroundColor Green -NoNewLine; Break}
+            Default{
+                Write-Host $reply -NoNewLine
+            }
+        }
+        # Let's just completely close connection if error
+        if($reply -like "5*"){break}
         if($tcp.connected)
         {
             $command = $commands[$commandCount]
